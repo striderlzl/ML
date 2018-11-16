@@ -1,0 +1,107 @@
+from sklearn.metrics import precision_recall_fscore_support
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import normalize
+from sklearn.model_selection import GridSearchCV
+from sklearn.svm import LinearSVC
+from sklearn import metrics
+from sklearn.metrics import accuracy_score
+from ML.svm.semi_supervised_svm import semi_supervised
+from ML.tools.train_test import train_test
+from ML.tools.split_data import split_data
+
+'''
+Monte-Carlo Simulation: Repeat the following procedures for semi-supervised learning M = 30 times, a
+nd use randomly selected train and test data (make sure you use 20% of both the positve and 
+negative classes as the test set). 
+
+Use Breast Cancer Wisconsin (Diagnostic) Data Set as an example.
+
+Parameters
+----------
+X_train,y_train : pandas.DataFrame
+    come from the dataset
+    
+C_range: ndarray or list
+    svm parameter
+
+Return
+----------
+X_label,y_label,X_unlabel,y_unlabel: pandas.DataFrame
+    come from the dataset
+    
+precision_train, recall_train, fscore_train, auc_train, accuracy_train,
+                precision_test, recall_test, fscore_test, auc_test, accuracy_test: float
+    the average accuracy, precision, recall, F-score, and AUC, for both training and test sets over M(30) runs
+'''
+
+
+def Semi_Monte(data, C_range = 10. ** np.arange(-5, 4)):
+    precision_train = []
+    recall_train = []
+    fscore_train = []
+    auc_train = []
+    accuracy_train = []
+    precision_test = []
+    recall_test = []
+    fscore_test = []
+    auc_test = []
+    accuracy_test = []
+    for i in range(1, 31):
+        print(i)
+        ### prepare input  ###
+        X_train, y_train, X_test, y_test = train_test(i,data)
+        X_label, y_label, X_unlabel, y_unlabel = split_data(X_train, y_train, i)
+        X_label_columns = X_label.columns
+        X_unlabel_columns = X_unlabel.columns
+        X_label_index = X_label.index
+        X_unlabel_index = X_unlabel.index
+
+        X_label = normalize(X_label)
+        X_unlabel = normalize(X_unlabel)
+        X_test = normalize(X_test)
+        X_label = pd.DataFrame(X_label, columns=X_label_columns)
+        X_unlabel = pd.DataFrame(X_unlabel, columns=X_unlabel_columns)
+        X_label = X_label.set_index(X_label_index)
+        X_unlabel = X_unlabel.set_index(X_unlabel_index)
+        ###  find best C  ###
+        C_range = C_range
+        param_grid = dict(C=C_range)
+        grid = GridSearchCV(LinearSVC(penalty='l1', dual=False)
+                            , param_grid=param_grid, cv=5)
+        grid.fit(X_label, y_label)
+        # print(grid.best_params_)
+        C = grid.best_params_['C']
+
+        ###  Semi-supervised  ###
+        clf_semi, new_sample, new_target = semi_supervised(X_label, y_label, X_unlabel, y_unlabel, C)
+        # train part
+        y_pred1 = clf_semi.predict(new_sample)
+        report1 = precision_recall_fscore_support(new_target, y_pred1, average='binary')
+        fpr1, tpr1, thresholds1 = metrics.roc_curve(new_target, y_pred1)
+        accuracy1 = accuracy_score(new_target, y_pred1)
+        precision1 = report1[0]
+        recall1 = report1[1]
+        fscore1 = report1[2]
+        precision_train.append(precision1)
+        recall_train.append(recall1)
+        fscore_train.append(fscore1)
+        auc_train.append(metrics.auc(fpr1, tpr1))
+        accuracy_train.append(accuracy1)
+
+        # test part
+        y_pred2 = clf_semi.predict(X_test)
+        report2 = precision_recall_fscore_support(y_test, y_pred2, average='binary')
+        fpr2, tpr2, thresholds2 = metrics.roc_curve(y_test, y_pred2)
+        accuracy2 = accuracy_score(y_test, y_pred2)
+        precision2 = report2[0]
+        recall2 = report2[1]
+        fscore2 = report2[2]
+        precision_test.append(precision2)
+        recall_test.append(recall2)
+        fscore_test.append(fscore2)
+        auc_test.append(metrics.auc(fpr2, tpr2))
+        accuracy_test.append(accuracy2)
+
+    return (precision_train, recall_train, fscore_train, auc_train, accuracy_train,
+            precision_test, recall_test, fscore_test, auc_test, accuracy_test)
